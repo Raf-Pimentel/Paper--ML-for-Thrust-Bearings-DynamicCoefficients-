@@ -17,7 +17,7 @@ Hydrodynamic lubrication relies on complex fluid dynamics (such as the Reynolds 
 
 The project has been organized into the following directories:
 
-\`\`\`text
+```
 .
 ├── src/                    # Core Python scripts for ML models and data generation
 │   ├── MLRegressionC_*.py  # Damping coefficient regression models
@@ -34,28 +34,28 @@ The project has been organized into the following directories:
 │   └── summary_photos/     # Additional project imagery
 ├── docs/                   # Academic literature and theoretical reference materials
 └── archives/               # Zipped templates (e.g., MECSOL 2026 LaTeX template) and backups
-\`\`\`
+```
 
 ## 🛠️ Setup and Installation
 
 **1. Clone the repository:**
-\`\`\`bash
+```bash
 git clone https://github.com/Raf-Pimentel/Paper--ML-for-Thrust-Bearings-DynamicCoefficients-.git
 cd Paper--ML-for-Thrust-Bearings-DynamicCoefficients-
-\`\`\`
+```
 
 **2. Install Dashboard Dependencies:**
 Navigate to the dashboard directory and install the required Python packages. It is recommended to use a virtual environment.
-\`\`\`bash
+```bash
 cd Mancais_Dashboard
 pip install -r requirements.txt
-\`\`\`
+```
 
 **3. Run the Interactive Dashboard:**
-\`\`\`bash
+```bash
 python main.py 
 # (Or 'streamlit run main.py' depending on the framework used)
-\`\`\`
+```
 
 ## 📊 Visualizations & Results
 
