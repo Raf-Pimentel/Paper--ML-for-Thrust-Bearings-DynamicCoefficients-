@@ -6,14 +6,36 @@ __pycache__/
 .Python
 env/
 venv/
+.env
+*.egg-info/
+dist/
+build/
 
-# Ignore PDF literature and books
-*.pdf
+# Jupyter
+.ipynb_checkpoints/
 
-# Ignore heavy archive files
-archives/
-*.zip
+# Data (large files — store on cloud or reproduce with generate_dataset.py)
+data/*.csv
 
-# OS generated files
+# Trained models (large .pkl files — reproduce with train_surrogate.py)
+models/*.pkl
+
+# Figures (reproducible from scripts)
+figures/paper/*.png
+figures/exploratory/*.png
+
+# OS
 .DS_Store
 Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# LaTeX auxiliary files
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.synctex.gz
+paper/*.bbl
+paper/*.blg
