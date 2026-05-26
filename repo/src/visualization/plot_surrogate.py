@@ -1,0 +1,112 @@
+"""
+plot_surrogate.py
+=================
+Generates Figures 7 and 8 of the MECSOL 2026 paper:
+    Fig. 7 — Surrogate validation for K (solid: numerical, dots: RF prediction)
+    Fig. 8 — Surrogate validation for C (same convention)
+Both include a zoom inset for the critical region H₀ < 0.1.
+
+Usage
+-----
+    python src/visualization/plot_surrogate.py
+
+Authors
+-------
+Rafael R. P. de Melo, Thales F. Peixoto — LAMAR / FEM-UNICAMP — MECSOL 2026
+"""
+
+from __future__ import annotations
+import argparse, sys
+from pathlib import Path
+
+import joblib
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+DATA_CSV  = Path("data/dataset_thrust_2D.csv")
+MODEL_DIR = Path("models")
+TARGET_LAMBDAS = [0.5, 1.0, 2.0]
+H0_DENSE = np.linspace(0.05, 3.0, 300)
+COLORS   = ["#1f77b4", "#d62728", "#2ca02c"]
+MARKERS  = ["o", "s", "^"]
+
+
+def _closest(arr: np.ndarray, v: float) -> float:
+    return arr[np.argmin(np.abs(arr - v))]
+
+
+def make_figure(target: str, outdir: Path) -> None:
+    df = pd.read_csv(DATA_CSV)
+    model = joblib.load(MODEL_DIR / f"best_model_{target}.pkl")
+
+    v_vals = df["V"].unique()
+    v0 = v_vals[np.argmin(np.abs(v_vals))]
+    df_v0 = df[df["V"] == v0].copy()
+    unique_lam = df["Lambda"].unique()
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    axins = ax.inset_axes([0.52, 0.42, 0.44, 0.50])
+
+    for tgt, col, mrk in zip(TARGET_LAMBDAS, COLORS, MARKERS):
+        lam = _closest(unique_lam, tgt)
+        sub = df_v0[np.isclose(df_v0["Lambda"], lam, atol=1e-3)].sort_values("H0")
+
+        # Numerical data (solid line)
+        ax.plot(sub["H0"], sub[target], color=col, linewidth=2.0,
+                label=rf"Numerical  $\Lambda\approx{lam:.2f}$")
+        axins.plot(sub[sub["H0"] < 0.11]["H0"],
+                   sub[sub["H0"] < 0.11][target], color=col, linewidth=2.0)
+
+        # Surrogate predictions (scatter)
+        feat = np.column_stack([H0_DENSE, np.full_like(H0_DENSE, v0),
+                                np.full_like(H0_DENSE, lam)])
+        pred = model.predict(feat)
+        ax.scatter(H0_DENSE[::6], pred[::6], color=col, marker=mrk,
+                   s=22, zorder=4, label=rf"Surrogate  $\Lambda\approx{lam:.2f}$")
+
+        # Inset scatter
+        H0_zoom = H0_DENSE[H0_DENSE < 0.1]
+        feat_z = np.column_stack([H0_zoom, np.full_like(H0_zoom, v0),
+                                  np.full_like(H0_zoom, lam)])
+        pred_z = model.predict(feat_z)
+        axins.scatter(H0_zoom[::2], pred_z[::2], color=col, marker=mrk, s=18, zorder=4)
+
+    ax.set_xlabel(r"Film-thickness ratio,  $H_0 = h_0/s_h$", fontsize=12)
+    ax.set_ylabel(rf"Dimensionless {target} coefficient,  ${target}$", fontsize=12)
+    ax.set_title(
+        rf"Surrogate validation — ${target}$ vs $H_0$  (V = 0)"
+        "\n(solid: 2-D numerical  |  dots: Random Forest surrogate)",
+        fontsize=12,
+    )
+    ax.set_xlim(0.0, 3.05)
+    ax.legend(fontsize=9, ncol=2, framealpha=0.9, loc="lower right")
+    ax.grid(True, linestyle=":", alpha=0.45)
+
+    axins.set_xlim(0.04, 0.10)
+    axins.set_xlabel(r"$H_0$", fontsize=9)
+    axins.set_ylabel(rf"${target}$", fontsize=9)
+    axins.set_title(r"Zoom: $H_0 < 0.1$", fontsize=9)
+    axins.tick_params(labelsize=8)
+    axins.grid(True, linestyle=":", alpha=0.4)
+    ax.indicate_inset_zoom(axins, edgecolor="gray", alpha=0.6)
+
+    fig.tight_layout()
+    outpath = outdir / f"surrogate_{target}_validation.png"
+    fig.savefig(outpath, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved → {outpath}")
+
+
+def main(outdir: Path = Path("figures/paper")) -> None:
+    outdir.mkdir(parents=True, exist_ok=True)
+    for t in ["K", "C"]:
+        make_figure(t, outdir)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--outdir", type=Path, default=Path("figures/paper"))
+    main(outdir=parser.parse_args().outdir)

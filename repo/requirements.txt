@@ -1,0 +1,21 @@
+# Core scientific stack
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+
+# Machine learning
+scikit-learn>=1.3
+xgboost>=2.0
+joblib>=1.3
+
+# Visualisation
+matplotlib>=3.7
+
+# Progress bar
+tqdm>=4.65
+
+# Symbolic math (formula derivation / verification)
+sympy>=1.12
+
+# Testing
+pytest>=7.4
