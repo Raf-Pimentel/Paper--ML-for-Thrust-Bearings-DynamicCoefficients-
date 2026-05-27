@@ -265,21 +265,21 @@ fig = plt.figure(figsize=(16, 6))
 # --- Plot 1: Superfície 3D numérica ---
 ax1 = fig.add_subplot(121, projection='3d')
 surf = ax1.plot_surface(X_grid, Y_grid, P, cmap='viridis', edgecolor='none')
-fig.colorbar(surf, ax=ax1, shrink=0.5, aspect=10, label='P (adimensional)')
-ax1.set_xlabel('X (adimensional)')
-ax1.set_ylabel('Y (adimensional)')
-ax1.set_zlabel('P (adimensional)')
-ax1.set_title('Solução Numérica 2D\n(Mancal Finito — Diferenças Finitas + SOR)')
+fig.colorbar(surf, ax=ax1, shrink=0.5, aspect=10, label='P (dimensionless)')
+ax1.set_xlabel('X (dimensionless)')
+ax1.set_ylabel('Y (dimensionless)')
+ax1.set_zlabel('P (dimensionless)')
+ax1.set_title('(a) 2D Numerical Solution\n(Finite Bearing — Finite Differences + SOR)')
 ax1.view_init(elev=30, azim=-135)
 
 # --- Plot 2: Comparação perfil central ---
 ax2 = fig.add_subplot(122)
-ax2.plot(X, P_analitica,    'r--', linewidth=2, label='Analítico 1D (mancal infinito)')
-ax2.plot(X, P[:, j_center], 'b-',  linewidth=2, label='Numérico 2D  (Y = 0.5)')
-ax2.set_xlabel('X (adimensional)')
-ax2.set_ylabel('Pressão P (adimensional)')
-ax2.set_title('Analítico 1D vs. Numérico 2D\n'
-              r'Perfil central (Y = 0.5)  —  $\Lambda$ = ' + f'{Lambda:.1f}')
+ax2.plot(X, P_analitica,    'r--', linewidth=2, label='1D Analytical (infinite bearing)')
+ax2.plot(X, P[:, j_center], 'b-',  linewidth=2, label='2D Numerical  (Y = 0.5)')
+ax2.set_xlabel('X (dimensionless)')
+ax2.set_ylabel('Pressure P (dimensionless)')
+ax2.set_title('(b) 1D Analytical vs. 2D Numerical\n'
+              r'Central profile (Y = 0.5)  —  $\Lambda$ = ' + f'{Lambda:.1f}')
 ax2.legend()
 ax2.grid(True, alpha=0.3)
 
