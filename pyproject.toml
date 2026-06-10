@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "thrust-bearings-ml"
+version = "0.1.0"
+description = "ML surrogate for dynamic coefficients of finite-length hydrodynamic thrust bearings"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "scikit-learn>=1.3",
+    "xgboost>=2.0",
+    "joblib>=1.3",
+    "matplotlib>=3.7",
+    "tqdm>=4.65",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "sympy>=1.12"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]

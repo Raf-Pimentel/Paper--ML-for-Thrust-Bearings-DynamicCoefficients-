@@ -18,19 +18,21 @@
 Hydrodynamic thrust bearings support axial loads in rotating machinery through a
 pressurised lubricant film. Accurately characterising their **dynamic stiffness (K)**
 and **damping (C)** coefficients is critical for rotordynamic stability analysis.
-Classical 1-D analytical models ignore side leakage, which can reduce K and C by up
-to **92 %** and **57 %** respectively for realistic pad aspect ratios.
+Classical 1-D analytical models ignore side leakage, which reduces K and C by up
+to **51 %** and **54 %** respectively at representative operating conditions
+(Λ = 1.0, H₀ ≈ 0.46), converging to approximately **57 %** for large film-thickness
+ratios.
 
 This repository implements a complete end-to-end pipeline:
 
 1. **2-D Reynolds solver** — Finite Difference Method with Gauss–Seidel/SOR on a
    100 × 100 mesh, accounting for side leakage through the aspect ratio Λ.
 2. **Structured dataset generation** — 4,500 operating points over
-   {H₀, V, Λ} with checkpoint-based resumability.
+   {H₀, V, Λ} with checkpoint-based resumability and joblib parallelisation.
 3. **Surrogate training and comparison** — Random Forest, XGBoost, and MLP
    regressors benchmarked on a Λ-stratified 80/20 split.
 4. **Validated surrogate** — Random Forest achieves R² = 1.000000 on both K and C,
-   with a **69× speed-up** per prediction over the full solver.
+   with a **25× speed-up** per prediction over the full solver.
 
 ---
 
@@ -38,11 +40,12 @@ This repository implements a complete end-to-end pipeline:
 
 | Metric | Value |
 |--------|-------|
-| Side-leakage reduction in \|K\| (Λ ≈ 1.08, H₀ ≈ 0.46) | **92 %** |
-| Side-leakage reduction in \|C\| (Λ ≈ 1.08, H₀ ≈ 0.46) | **57 %** |
+| Side-leakage reduction in K (Λ = 1.0, H₀ ≈ 0.46) | **51 %** |
+| Side-leakage reduction in C (Λ = 1.0, H₀ ≈ 0.46) | **54 %** |
+| Asymptotic reduction (both K and C, large H₀) | **~ 57 %** |
 | Best surrogate R² — K (Random Forest) | **1.000000** |
 | Best surrogate R² — C (Random Forest) | **1.000000** |
-| Speed-up vs 2-D solver (single call) | **69×** |
+| Speed-up vs 2-D solver (single call) | **25×** |
 | Speed-up vs 2-D solver (batch mode) | **> 10,000×** |
 
 ---
@@ -55,29 +58,24 @@ This repository implements a complete end-to-end pipeline:
 │   ├── solver/
 │   │   └── reynolds_solver.py       # 2-D FDM Gauss–Seidel/SOR pressure solver
 │   ├── ml/
-│   │   ├── generate_dataset.py      # Dataset generation with checkpoint support
+│   │   ├── generate_dataset.py      # Parallel dataset generation (joblib)
 │   │   └── train_surrogate.py       # Model training, evaluation, and export
 │   ├── visualization/
-│   │   ├── plot_pressure.py         # 1-D pressure distribution (Fig. 3)
-│   │   ├── plot_pressure_2d.py      # 3-D pressure surface (Fig. 4)
 │   │   ├── plot_coefficients.py     # K and C vs H₀ (Figs. 5–6)
 │   │   └── plot_surrogate.py        # Surrogate validation plots (Figs. 7–8)
 │   └── utils/
 │       └── analytical.py            # Closed-form 1-D reference formulas
-├── data/
-│   └── dataset_thrust_2D.csv        # Pre-computed 4,500-point dataset
-├── models/
-│   ├── best_model_K.pkl             # Trained Random Forest for K
-│   └── best_model_C.pkl             # Trained Random Forest for C
+├── tests/
+│   └── test_solver.py               # Unit tests for analytical formulas
+├── data/                            # Generated dataset (ignored by git — reproduce below)
+├── models/                          # Trained models (ignored by git — reproduce below)
 ├── figures/
 │   ├── paper/                       # Publication-ready figures (300 dpi)
-│   └── exploratory/                 # Development and validation plots
-├── paper/
-│   └── MSL-2026-RafaelMelo.tex      # MECSOL 2026 LaTeX manuscript
-├── tests/
-│   └── test_solver.py               # Unit tests for solver and analytics
+│   └── plots/                       # Development and reference plots
 ├── docs/
 │   └── equations.md                 # Mathematical derivations reference
+├── archives/                        # Exploratory scripts and legacy code
+├── pyproject.toml                   # Package installation (pip install -e .)
 ├── environment.yml                  # Conda environment specification
 ├── requirements.txt                 # Pip requirements
 └── README.md
@@ -96,10 +94,15 @@ cd Paper--ML-for-Thrust-Bearings-DynamicCoefficients-
 # Option A — conda (recommended)
 conda env create -f environment.yml
 conda activate thrust-bearings-ml
+pip install -e .
 
 # Option B — pip
 pip install -r requirements.txt
+pip install -e .
 ```
+
+The `pip install -e .` step makes `src` importable from anywhere in the project
+without path manipulation.
 
 ### 2. Run a single bearing evaluation
 
@@ -111,7 +114,7 @@ result = solver.solve(H0=0.5, V=0.0, Lambda=1.0)
 print(f"Wz = {result.Wz:.4f}   K = {result.K:.4f}   C = {result.C:.4f}")
 ```
 
-### 3. Predict with the trained surrogate (69× faster)
+### 3. Predict with the trained surrogate (25× faster)
 
 ```python
 import joblib, numpy as np
@@ -125,18 +128,26 @@ print(f"K = {model_K.predict(X)[0]:.6f}")
 print(f"C = {model_C.predict(X)[0]:.6f}")
 ```
 
-### 4. Regenerate the dataset (≈ several hours on a single CPU core)
+### 4. Regenerate the dataset
 
 ```bash
 python src/ml/generate_dataset.py
 ```
 
-Progress is saved every 500 rows and the run can be resumed after interruption.
+Uses all available CPU cores via joblib. Completes in approximately 1 minute on
+a modern multi-core machine. Progress is saved every 500 rows and the run can be
+resumed after interruption.
 
 ### 5. Retrain the surrogate models
 
 ```bash
 python src/ml/train_surrogate.py
+```
+
+### 6. Run tests
+
+```bash
+pytest tests/ -v
 ```
 
 ---
@@ -183,14 +194,18 @@ See [`docs/equations.md`](docs/equations.md) for full derivations.
 
 | Target | Model | RMSE (full) | R² (full) | RMSE (H₀ < 0.1) | R² (H₀ < 0.1) |
 |--------|-------|-------------|-----------|-----------------|----------------|
-| K | **Random Forest** ★ | 7 × 10⁻⁶ | **1.000000** | < 10⁻⁶ | **1.000000** |
-| K | XGBoost | 7 × 10⁻⁴ | 1.000000 | 1.7 × 10⁻⁴ | 1.000000 |
-| K | ANN (MLP) | 5.9 × 10⁻² | 0.998895 | 3.0 × 10⁻¹ | 0.990113 |
-| C | **Random Forest** ★ | 7.6 × 10⁻⁵ | **1.000000** | 3 × 10⁻⁶ | **1.000000** |
-| C | XGBoost | 1.7 × 10⁻⁴ | 0.999998 | 1.7 × 10⁻⁴ | 1.000000 |
-| C | ANN (MLP) | 7.1 × 10⁻³ | 0.996622 | 3.2 × 10⁻² | 0.987961 |
+| K | **Random Forest** ★ | 3.3 × 10⁻⁶ | **1.000000** | 3.7 × 10⁻¹⁴ | **1.000000** |
+| K | XGBoost | 8.7 × 10⁻⁴ | 1.000000 | 2.1 × 10⁻⁴ | 1.000000 |
+| K | ANN (MLP) | 5.4 × 10⁻² | 0.999200 | 2.6 × 10⁻¹ | 0.993600 |
+| C | **Random Forest** ★ | 5.8 × 10⁻⁴ | **1.000000** | 3.3 × 10⁻³ | **1.000000** |
+| C | XGBoost | 1.3 × 10⁻³ | 1.000000 | 2.4 × 10⁻⁴ | 1.000000 |
+| C | ANN (MLP) | 2.9 × 10⁻² | 0.999700 | 1.2 × 10⁻¹ | 0.999000 |
 
 ★ Selected model — retrained on the full 4,500-point dataset.
+
+The near-machine-precision RMSE of 3.7 × 10⁻¹⁴ for K in the H₀ < 0.1 sub-range
+reflects the high regularity of K(H₀, V, Λ) in the thin-film limit, not data
+leakage — all 28 test points in this region are genuine held-out samples.
 
 ---
 
@@ -233,5 +248,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 ## Acknowledgements
 
 The first author thanks UNICAMP for the undergraduate research scholarship
-(Iniciação Científica). The authors thank LAMAR/FEM-UNICAMP for computational
-infrastructure and a stimulating research environment.
+(Iniciação Científica). This study was financed in part by the São Paulo Research
+Foundation (FAPESP), Brazil, under Process No. 2023/11872-0. The authors thank
+LAMAR/FEM-UNICAMP for computational infrastructure and a stimulating research
+environment.
