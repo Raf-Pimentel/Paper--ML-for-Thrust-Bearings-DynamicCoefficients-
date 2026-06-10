@@ -30,7 +30,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from src.utils.analytical import stiffness_1d, damping_1d
+from src.utils.analytical import stiffness_1d, damping_1d, load_capacity_1d
 
 DATA_CSV  = Path("data/dataset_thrust_2D.csv")
 TARGET_LAMBDAS = [0.5, 1.0, 2.0]
@@ -62,24 +62,25 @@ def make_figure(target: str, y_label: str, ref_fn, outdir: Path) -> None:
         sub = df_v0[np.isclose(df_v0["Lambda"], lam, atol=1e-3)].sort_values("H0")
         ax.plot(sub["H0"], sub[target], color=col, marker=mrk,
                 markersize=5, linewidth=1.6,
-                label=rf"2-D numerical  $\Lambda \approx {lam:.2f}$")
+                label=rf"2-D numerical  $\Lambda ={lam:.2f}$")
 
     ax.axhline(0, color="gray", linewidth=0.8, linestyle=":")
-    ax.set_xlabel(r"Film-thickness ratio,  $H_0 = h_0/s_h$", fontsize=13)
-    ax.set_ylabel(y_label, fontsize=13)
+    ax.set_xlabel(r"Film-thickness ratio,  $H_0 = h_0/s_h$", fontsize=16)
+    ax.set_ylabel(y_label, fontsize=16)
     ax.set_xlim(0.0, 3.05)
-    ax.legend(fontsize=11, framealpha=0.9)
+    ax.tick_params(axis="both", labelsize=13)
+    ax.legend(fontsize=13, framealpha=0.9)
     ax.grid(True, linestyle=":", alpha=0.45)
     ax.set_title(
         rf"Dynamic {target} coefficient vs $H_0$  (V = 0)"
         "\n(solid: 2-D numerical  |  dashed: 1-D reference)",
-        fontsize=12,
+        fontsize=14,
     )
     fig.tight_layout()
     outpath = outdir / f"{target}_vs_H0.png"
     fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"Saved → {outpath}")
+    print(f"Saved -> {outpath}")
 
 
 def main(outdir: Path = Path("figures/paper")) -> None:

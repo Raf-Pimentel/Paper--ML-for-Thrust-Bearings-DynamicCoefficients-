@@ -4,13 +4,24 @@ reynolds_solver.py
 2-D finite-difference solver for the dimensionless Reynolds lubrication equation
 applied to a fixed-incline hydrodynamic thrust bearing.
 
-Governing equation (Eq. 6 — MECSOL 2026 paper)
-------------------------------------------------
-    d/dX(H³ dP/dX) + Λ² d/dY(H³ dP/dY) = dH/dX + 12V
+Governing equation (dimensionless form solved internally)
+---------------------------------------------------------
+    d/dX(H³ dP_int/dX) + Λ² d/dY(H³ dP_int/dY) = dH/dX + 12V
 
-where the pressure scale is  P = p s_h² / (μ u_b l_x),  the film geometry is
-H(X) = H₀ + (1 − X),  and homogeneous Dirichlet conditions P = 0 hold on all
+where H(X) = H₀ + (1 − X),  V = v_a l_x/(u_b s_h)  is the dimensionless
+squeeze velocity, and homogeneous Dirichlet conditions P_int = 0 hold on all
 four edges of the unit square [0,1]×[0,1].
+
+Pressure scale note
+-------------------
+The pressure field stored in BearingResult.P is the *internal* scale
+P_int = p s_h² / (6 μ u_b l_x).  To convert to the paper scale
+P_paper = p s_h² / (μ u_b l_x) multiply by 6:
+
+    P_paper = 6 × P_int
+
+Wz and K are numerically equal in both scales.
+C_paper = −∂Wz/∂V = 12 × C_int  (factor applied inside _damping).
 
 Numerical method
 ----------------
@@ -59,7 +70,8 @@ class BearingResult:
     Lambda : float
         Pad aspect ratio lₓ/lᵧ.
     P : np.ndarray, shape (nx, ny)
-        Converged dimensionless pressure field.
+        Converged dimensionless pressure field (internal scale P_int).
+        Paper scale: P_paper = 6 × P_int.
     Wz : float
         Dimensionless load capacity  ∬ P dX dY.
     K : float
@@ -154,7 +166,7 @@ class ThrustBearingSolver:
         BearingResult
         """
         H = self._film(H0)
-        P, converged = self._solve_pressure(H, Lambda, V)
+        P, converged = self._solve_pressure(H, Lambda, 12.0 * V)
         Wz = self._integrate(P)
         K = self._stiffness(H0, Lambda)
         C = self._damping(H, Lambda, V)
@@ -175,39 +187,63 @@ class ThrustBearingSolver:
     def _solve_pressure(
         self, H: np.ndarray, Lambda: float, dHdt: float
     ) -> tuple[np.ndarray, bool]:
-        """Gauss–Seidel/SOR iteration for the dimensionless pressure field."""
+        """Direct sparse-matrix solver for the Reynolds pressure field.
+
+        Assembles the 5-point FD stencil into a sparse CSR matrix and solves
+        with scipy's sparse direct solver (SuperLU).  No iterations — exact
+        solution to the discretised equations in O(nnz) time.
+        """
+        from scipy.sparse import coo_matrix
+        from scipy.sparse.linalg import spsolve
+
         nx, ny = self.nx, self.ny
         dx, dy = self.dx, self.dy
-        omega = self.omega
+        ni, nj = nx - 2, ny - 2      # interior grid dimensions
+
+        # Coefficient arrays on the interior grid (ni × nj) — vectorised
+        Hp  = H[1:-1, 1:-1]
+        dHX = (H[2:,  1:-1] - H[:-2, 1:-1]) / (2.0 * dx)
+        dHY = (H[1:-1,  2:] - H[1:-1, :-2]) / (2.0 * dy)
+        Hp3 = Hp ** 3
+        Hp2 = Hp ** 2
+        La2 = Lambda ** 2
+
+        aE = ( Hp3 / dx**2 + 3.0 * Hp2 * dHX / (2.0 * dx)).ravel()
+        aW = ( Hp3 / dx**2 - 3.0 * Hp2 * dHX / (2.0 * dx)).ravel()
+        aN = (La2 * Hp3 / dy**2 + 3.0 * La2 * Hp2 * dHY / (2.0 * dy)).ravel()
+        aS = (La2 * Hp3 / dy**2 - 3.0 * La2 * Hp2 * dHY / (2.0 * dy)).ravel()
+        aP = -(aE + aW + aN + aS)
+        b  = (dHX + dHdt).ravel()
+
+        # Flat node index: k = (i-1)*nj + (j-1), i∈[1,nx-2], j∈[1,ny-2]
+        n = ni * nj
+        k = np.arange(n)
+
+        r_list = [k];       c_list = [k];             d_list = [aP]
+
+        m = k + nj < n                                # East  (i+1)
+        r_list.append(k[m]);  c_list.append((k + nj)[m]); d_list.append(aE[m])
+
+        m = k >= nj                                   # West  (i-1)
+        r_list.append(k[m]);  c_list.append((k - nj)[m]); d_list.append(aW[m])
+
+        m = (k % nj) != (nj - 1)                     # North (j+1)
+        r_list.append(k[m]);  c_list.append((k + 1)[m]);  d_list.append(aN[m])
+
+        m = (k % nj) != 0                             # South (j-1)
+        r_list.append(k[m]);  c_list.append((k - 1)[m]);  d_list.append(aS[m])
+
+        A = coo_matrix(
+            (np.concatenate(d_list),
+             (np.concatenate(r_list), np.concatenate(c_list))),
+            shape=(n, n),
+        ).tocsr()
+
+        P_flat = spsolve(A, b)
+
         P = np.zeros((nx, ny))
-
-        for _ in range(self.max_iter):
-            P_old = P.copy()
-            for i in range(1, nx - 1):
-                for j in range(1, ny - 1):
-                    Hp = H[i, j]
-                    Pe, Pw = P[i + 1, j], P[i - 1, j]
-                    Pn, Ps = P[i, j + 1], P[i, j - 1]
-
-                    dHdX = (H[i + 1, j] - H[i - 1, j]) / (2.0 * dx)
-                    dHdY = (H[i, j + 1] - H[i, j - 1]) / (2.0 * dy)
-
-                    # Source term consistent with pressure scale P = p s²/(μ u l)
-                    Bp = dHdX + dHdt
-
-                    tXd = Hp**3 * (Pe + Pw) / dx**2
-                    tXc = 3.0 * Hp**2 * dHdX * (Pe - Pw) / (2.0 * dx)
-                    tYd = Lambda**2 * Hp**3 * (Pn + Ps) / dy**2
-                    tYc = 3.0 * Lambda**2 * Hp**2 * dHdY * (Pn - Ps) / (2.0 * dy)
-                    denom = 2.0 * Hp**3 * (1.0 / dx**2 + Lambda**2 / dy**2)
-
-                    pij = (tXd + tXc + tYd + tYc - Bp) / denom
-                    P[i, j] += omega * (pij - P[i, j])
-
-            if np.max(np.abs(P - P_old)) < self.tolerance:
-                return P, True
-
-        return P, False  # max_iter reached without convergence
+        P[1:-1, 1:-1] = P_flat.reshape(ni, nj)
+        return P, True          # direct solver always "converges"
 
     def _integrate(self, P: np.ndarray) -> float:
         """Dimensionless load capacity via Riemann sum  Wz ≈ Σ P ΔX ΔY."""
@@ -221,8 +257,13 @@ class ThrustBearingSolver:
         return -(self._integrate(Hp) - self._integrate(Hm)) / (2.0 * eps)
 
     def _damping(self, H: np.ndarray, Lambda: float, V: float) -> float:
-        """C = −∂Wz/∂V  (central FD, H₀ fixed)."""
+        """C = −∂Wz/∂V  (central FD, H₀ fixed).
+
+        The solver receives dHdt = 12·(V ± eps), so the finite-difference
+        quotient (W_plus − W_minus)/(2·eps) directly approximates ∂Wz/∂V,
+        giving C = −∂Wz/∂V without any extra scale factor.
+        """
         eps = self.epsilon_fd
-        Pp, _ = self._solve_pressure(H, Lambda, V + eps)
-        Pm, _ = self._solve_pressure(H, Lambda, V - eps)
+        Pp, _ = self._solve_pressure(H, Lambda, 12.0 * (V + eps))
+        Pm, _ = self._solve_pressure(H, Lambda, 12.0 * (V - eps))
         return -(self._integrate(Pp) - self._integrate(Pm)) / (2.0 * eps)

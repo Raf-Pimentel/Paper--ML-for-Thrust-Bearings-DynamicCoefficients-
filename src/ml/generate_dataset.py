@@ -16,6 +16,12 @@ Output
 ------
     data/dataset_thrust_2D.csv   columns: H0, V, Lambda, Wz, K, C
 
+Parallelisation
+---------------
+Each operating point is independent; the sweep is distributed across all
+available CPU cores using joblib (backend='loky').  Pass --workers N to
+limit the number of parallel workers (default: all cores).
+
 Resume / checkpoint behaviour
 ------------------------------
 If the output CSV already exists, the script counts its rows, skips those
@@ -25,8 +31,7 @@ flushed to disk every CHECKPOINT_EVERY rows.
 Usage
 -----
     python src/ml/generate_dataset.py
-
-    # Override output path:
+    python src/ml/generate_dataset.py --workers 4
     python src/ml/generate_dataset.py --output data/my_dataset.csv
 
 Authors
@@ -38,12 +43,12 @@ from __future__ import annotations
 
 import argparse
 import itertools
-import os
 import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 from tqdm import tqdm
 
 # Ensure project root is on sys.path when running this file directly
@@ -58,14 +63,29 @@ OUTPUT_CSV       = Path("data/dataset_thrust_2D.csv")
 CHECKPOINT_EVERY = 500          # flush to disk every N completed rows
 N_MESH           = 100          # solver mesh (100×100)
 EPSILON_FD       = 1e-4         # finite-difference step for K and C
-SOLVER_TOL       = 1e-6         # Gauss–Seidel convergence tolerance
+SOLVER_TOL       = 1e-6         # Gauss-Seidel convergence tolerance
+N_WORKERS        = -1           # -1 = all available CPU cores
 
 # Parameter grids — must match those reported in the paper (Table 2)
 H0_VALUES     = np.linspace(0.05, 3.0, 30)
 V_VALUES      = np.linspace(-2.0, 2.0, 15)
-LAMBDA_VALUES = np.linspace(0.25, 4.0, 10)
+LAMBDA_VALUES = np.array([0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0])
 
 COLUMNS = ["H0", "V", "Lambda", "Wz", "K", "C"]
+
+
+# ---------------------------------------------------------------------------
+# Per-point worker (runs in a separate process — no shared state)
+# ---------------------------------------------------------------------------
+
+def _compute_point(
+    H0: float, V: float, Lambda: float,
+    nx: int, ny: int, tol: float, eps_fd: float,
+) -> tuple[float, float, float, float, float, float]:
+    """Solve one operating point and return (H0, V, Lambda, Wz, K, C)."""
+    solver = ThrustBearingSolver(nx=nx, ny=ny, tolerance=tol, epsilon_fd=eps_fd)
+    r = solver.solve(H0=H0, V=V, Lambda=Lambda)
+    return (H0, V, Lambda, r.Wz, r.K, r.C)
 
 
 # ---------------------------------------------------------------------------
@@ -86,14 +106,13 @@ def _count_existing_rows(csv_path: Path) -> int:
 # Main sweep
 # ---------------------------------------------------------------------------
 
-def run(output: Path = OUTPUT_CSV) -> None:
-    """Execute the parameter sweep and write results to *output*."""
+def run(output: Path = OUTPUT_CSV, n_workers: int = N_WORKERS) -> None:
+    """Execute the parallel parameter sweep and write results to *output*."""
+    import os
+    n_cpu = os.cpu_count() or 1
+    workers_used = n_cpu if n_workers == -1 else min(n_workers, n_cpu)
+
     output.parent.mkdir(parents=True, exist_ok=True)
-    solver = ThrustBearingSolver(
-        nx=N_MESH, ny=N_MESH,
-        tolerance=SOLVER_TOL,
-        epsilon_fd=EPSILON_FD,
-    )
 
     all_points = list(itertools.product(H0_VALUES, V_VALUES, LAMBDA_VALUES))
     total = len(all_points)
@@ -107,52 +126,56 @@ def run(output: Path = OUTPUT_CSV) -> None:
             f"Continuing from row {n_done + 1}."
         )
 
+    print(
+        f"\nParameter sweep: {total} points total ({len(remaining)} remaining)\n"
+        f"  H0     : {len(H0_VALUES)} pts  [{H0_VALUES[0]:.3f} ... {H0_VALUES[-1]:.3f}]\n"
+        f"  V      : {len(V_VALUES)} pts  [{V_VALUES[0]:.2f} ... {V_VALUES[-1]:.2f}]\n"
+        f"  Lambda : {len(LAMBDA_VALUES)} pts  [{LAMBDA_VALUES[0]:.2f} ... {LAMBDA_VALUES[-1]:.2f}]\n"
+        f"  Mesh   : {N_MESH}x{N_MESH}   eps = {EPSILON_FD}\n"
+        f"  Workers: {workers_used} / {n_cpu} cores\n"
+        f"  Output : {output}\n"
+    )
+
+    if not remaining:
+        print("Nothing to do — dataset already complete.")
+        return
+
     write_header = n_done == 0
     csv_fh = open(output, "a", newline="")
     if write_header:
         csv_fh.write(",".join(COLUMNS) + "\n")
 
-    buffer: list[str] = []
     rows_written = n_done
 
-    print(
-        f"\nParameter sweep: {total} points total ({len(remaining)} remaining)\n"
-        f"  H₀     : {len(H0_VALUES)} pts  [{H0_VALUES[0]:.3f} … {H0_VALUES[-1]:.3f}]\n"
-        f"  V      : {len(V_VALUES)} pts  [{V_VALUES[0]:.2f} … {V_VALUES[-1]:.2f}]\n"
-        f"  Λ      : {len(LAMBDA_VALUES)} pts  [{LAMBDA_VALUES[0]:.2f} … {LAMBDA_VALUES[-1]:.2f}]\n"
-        f"  Mesh   : {N_MESH}×{N_MESH}   ε = {EPSILON_FD}   "
-        f"checkpoint every {CHECKPOINT_EVERY} rows\n"
-        f"  Output : {output}\n"
-    )
-
+    # Process in batches so we can checkpoint periodically
+    batch_size = CHECKPOINT_EVERY
     pbar = tqdm(total=len(remaining), unit="pt", desc="Sweep", dynamic_ncols=True)
 
-    for H0, V, Lambda in remaining:
-        result = solver.solve(H0=H0, V=V, Lambda=Lambda)
+    for batch_start in range(0, len(remaining), batch_size):
+        batch = remaining[batch_start : batch_start + batch_size]
 
-        buffer.append(
-            f"{H0:.6f},{V:.6f},{Lambda:.6f},"
-            f"{result.Wz:.8f},{result.K:.8f},{result.C:.8f}\n"
+        results = Parallel(n_jobs=n_workers, backend="loky")(
+            delayed(_compute_point)(
+                H0, V, Lambda, N_MESH, N_MESH, SOLVER_TOL, EPSILON_FD
+            )
+            for H0, V, Lambda in batch
         )
-        rows_written += 1
 
-        if rows_written % CHECKPOINT_EVERY == 0:
-            csv_fh.writelines(buffer)
-            csv_fh.flush()
-            buffer.clear()
-            pbar.set_postfix({"saved": rows_written})
-
-        pbar.update(1)
-
-    if buffer:
-        csv_fh.writelines(buffer)
+        for row in results:
+            H0, V, Lambda, Wz, K, C = row
+            csv_fh.write(
+                f"{H0:.6f},{V:.6f},{Lambda:.6f},{Wz:.8f},{K:.8f},{C:.8f}\n"
+            )
         csv_fh.flush()
+        rows_written += len(results)
+        pbar.update(len(results))
+        pbar.set_postfix({"saved": rows_written})
 
     csv_fh.close()
     pbar.close()
 
     df = pd.read_csv(output)
-    print(f"\nDataset complete: {len(df)} rows → {output}")
+    print(f"\nDataset complete: {len(df)} rows -> {output}")
     print(df.describe().to_string())
 
 
@@ -161,12 +184,14 @@ def run(output: Path = OUTPUT_CSV) -> None:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[1].strip())
+    parser = argparse.ArgumentParser(description="Generate bearing dataset (parallel).")
     parser.add_argument(
-        "--output",
-        type=Path,
-        default=OUTPUT_CSV,
-        help="Path for the output CSV file (default: data/dataset_thrust_2D.csv)",
+        "--output", type=Path, default=OUTPUT_CSV,
+        help="Path for the output CSV (default: data/dataset_thrust_2D.csv)",
+    )
+    parser.add_argument(
+        "--workers", type=int, default=N_WORKERS,
+        help="Number of parallel workers (-1 = all cores, default: -1)",
     )
     args = parser.parse_args()
-    run(output=args.output)
+    run(output=args.output, n_workers=args.workers)

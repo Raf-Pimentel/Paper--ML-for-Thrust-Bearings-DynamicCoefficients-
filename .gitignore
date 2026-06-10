@@ -24,6 +24,16 @@ models/*.pkl
 figures/paper/*.png
 figures/exploratory/*.png
 
+# Large reference files (PDFs, zips — store externally)
+docs/*.pdf
+docs/*.PDF
+archives/*.zip
+archives/*.ZIP
+
+# Stray root-level generated files (reproducible from scripts)
+/*.png
+/*.csv
+
 # OS
 .DS_Store
 Thumbs.db

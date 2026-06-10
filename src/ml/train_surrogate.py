@@ -1,4 +1,4 @@
-"""
+﻿"""
 train_surrogate.py
 ==================
 Trains and benchmarks three surrogate regression models for the dynamic
@@ -17,8 +17,8 @@ aspect-ratio level appears in both training and test sets.
 
 Evaluation metrics
 ------------------
-RMSE and R² are reported on the held-out test set both for the full H₀ range
-and for the critical asymptotic sub-range H₀ < 0.1.
+RMSE and R2 are reported on the held-out test set both for the full H0 range
+and for the critical asymptotic sub-range H0 < 0.1.
 
 Output
 ------
@@ -136,7 +136,7 @@ def run(data_csv: Path = DATA_CSV) -> None:
     """Train, evaluate, and export surrogate models."""
     # -- Load data -----------------------------------------------------------
     df = pd.read_csv(data_csv)
-    print(f"Dataset loaded: {df.shape[0]} rows × {df.shape[1]} cols")
+    print(f"Dataset loaded: {df.shape[0]} rows x {df.shape[1]} cols")
 
     X = df[FEATURES].values
     lambda_col = df["Lambda"].values
@@ -148,12 +148,12 @@ def run(data_csv: Path = DATA_CSV) -> None:
     for target in TARGETS:
         y = df[target].values
         X_tr, X_te, y_tr, y_te = _stratified_split(X, y, lambda_col)
-        crit_mask = X_te[:, 0] < 0.1   # H₀ < 0.1 sub-range
+        crit_mask = X_te[:, 0] < 0.1   # H0 < 0.1 sub-range
 
-        print(f"\n{'─'*60}")
+        print(f"\n{'-'*60}")
         print(f"  Target: {target}   train={len(X_tr)}   test={len(X_te)}")
-        print(f"  Test points with H₀ < 0.1 : {crit_mask.sum()}")
-        print(f"{'─'*60}")
+        print(f"  Test points with H0 < 0.1 : {crit_mask.sum()}")
+        print(f"{'-'*60}")
 
         for name, mdl in MODEL_DEFS.items():
             print(f"  Training {name} ...", end=" ", flush=True)
@@ -161,43 +161,43 @@ def run(data_csv: Path = DATA_CSV) -> None:
             res["name"] = name
             results[target].append(res)
             print(
-                f"R²(full)={res['r2_full']:.6f}  "
+                f"R2(full)={res['r2_full']:.6f}  "
                 f"RMSE(full)={res['rmse_full']:.2e}  "
-                f"R²(H₀<0.1)={res['r2_crit']:.6f}"
+                f"R2(H0<0.1)={res['r2_crit']:.6f}"
             )
 
     # -- Summary table -------------------------------------------------------
-    SEP = "─" * 84
+    SEP = "-" * 84
     HDR = (
-        f"{'Model':<18} │ {'Target':<4} │ {'RMSE (full)':>11} │ "
-        f"{'R² (full)':>10} │ {'RMSE (H₀<0.1)':>13} │ {'R² (H₀<0.1)':>12}"
+        f"{'Model':<18} | {'Target':<4} | {'RMSE (full)':>11} | "
+        f"{'R2 (full)':>10} | {'RMSE (H0<0.1)':>13} | {'R2 (H0<0.1)':>12}"
     )
-    print(f"\n{'═'*84}")
+    print(f"\n{'='*84}")
     print("  SURROGATE ACCURACY SUMMARY")
-    print(f"{'═'*84}")
+    print(f"{'='*84}")
     print(HDR)
     for target in TARGETS:
         print(SEP)
         for r in results[target]:
             print(
-                f"{r['name']:<18} │ {target:<4} │ "
-                f"{r['rmse_full']:>11.2e} │ {r['r2_full']:>10.6f} │ "
-                f"{r['rmse_crit']:>13.2e} │ {r['r2_crit']:>12.6f}"
+                f"{r['name']:<18} | {target:<4} | "
+                f"{r['rmse_full']:>11.2e} | {r['r2_full']:>10.6f} | "
+                f"{r['rmse_crit']:>13.2e} | {r['r2_crit']:>12.6f}"
             )
-    print(f"{'═'*84}\n")
+    print(f"{'='*84}\n")
 
     # -- Export best models (retrain on full dataset) ------------------------
     for target in TARGETS:
         best = max(results[target], key=lambda r: r["r2_full"])
         print(
             f"Best model for {target}: {best['name']}  "
-            f"R²={best['r2_full']:.6f}  RMSE={best['rmse_full']:.2e}"
+            f"R2={best['r2_full']:.6f}  RMSE={best['rmse_full']:.2e}"
         )
         final = copy.deepcopy(best["model_obj"])
         final.fit(X, df[target].values)
         out_path = MODELS_DIR / f"best_model_{target}.pkl"
         joblib.dump(final, out_path)
-        print(f"  → Saved {out_path}")
+        print(f"  -> Saved {out_path}")
 
 
 # ---------------------------------------------------------------------------
