@@ -56,6 +56,9 @@ def make_figure(target: str, outdir: Path) -> None:
     df = pd.read_csv(DATA_CSV)
     model = joblib.load(MODEL_DIR / f"best_model_{target}.pkl")
 
+    # Surrogate validation uses full-taper pads (B=1)
+    if "B" in df.columns:
+        df = df[np.isclose(df["B"], 1.0, atol=1e-3)]
     v_vals = df["V"].unique()
     v0 = v_vals[np.argmin(np.abs(v_vals))]
     df_v0 = df[df["V"] == v0].copy()
@@ -74,7 +77,8 @@ def make_figure(target: str, outdir: Path) -> None:
 
         # ── Main axes: surrogate scatter ──────────────────────────────────
         feat = np.column_stack([H0_DENSE, np.full_like(H0_DENSE, v0),
-                                np.full_like(H0_DENSE, lam)])
+                                np.full_like(H0_DENSE, lam),
+                                np.ones_like(H0_DENSE)])   # B=1.0
         pred = model.predict(feat)
         ax.scatter(H0_DENSE[::6], pred[::6], color=col, marker=mrk,
                    s=22, zorder=4, label=rf"Surrogate  $\Lambda ={lam:.2f}$")
@@ -87,7 +91,8 @@ def make_figure(target: str, outdir: Path) -> None:
         # ── Inset: surrogate scatter ──────────────────────────────────────
         H0_zoom = H0_DENSE[H0_DENSE < 0.50]
         feat_z = np.column_stack([H0_zoom, np.full_like(H0_zoom, v0),
-                                  np.full_like(H0_zoom, lam)])
+                                  np.full_like(H0_zoom, lam),
+                                  np.ones_like(H0_zoom)])   # B=1.0
         pred_z = model.predict(feat_z)
         axins.scatter(H0_zoom[::6], pred_z[::6],
                       color=col, marker=mrk, s=18, zorder=4)

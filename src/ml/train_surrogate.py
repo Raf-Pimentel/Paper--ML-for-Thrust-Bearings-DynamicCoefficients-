@@ -66,7 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 DATA_CSV    = Path("data/dataset_thrust_2D.csv")
 MODELS_DIR  = Path("models")
-FEATURES    = ["H0", "V", "Lambda"]
+FEATURES    = ["H0", "V", "Lambda", "B"]
 TARGETS     = ["K", "C"]
 
 MODEL_DEFS = {

@@ -69,6 +69,9 @@ class BearingResult:
         Dimensionless squeeze velocity.
     Lambda : float
         Pad aspect ratio lₓ/lᵧ.
+    B : float
+        Dimensionless taper length β/lₓ ∈ (0, 1].  B=1 → full-length linear
+        taper; B<1 → tapered section [0,B] followed by flat region [B,1].
     P : np.ndarray, shape (nx, ny)
         Converged dimensionless pressure field (internal scale P_int).
         Paper scale: P_paper = 6 × P_int.
@@ -87,6 +90,7 @@ class BearingResult:
     H0: float
     V: float
     Lambda: float
+    B: float
     P: np.ndarray = field(repr=False)
     Wz: float = 0.0
     K: float = 0.0
@@ -149,7 +153,7 @@ class ThrustBearingSolver:
     # Public API
     # ------------------------------------------------------------------
 
-    def solve(self, H0: float, V: float, Lambda: float) -> BearingResult:
+    def solve(self, H0: float, V: float, Lambda: float, B: float = 1.0) -> BearingResult:
         """Evaluate all bearing quantities at one operating point.
 
         Parameters
@@ -160,18 +164,20 @@ class ThrustBearingSolver:
             Dimensionless squeeze velocity (positive = surfaces separating).
         Lambda : float
             Pad aspect ratio lₓ/lᵧ.  Must be > 0.
+        B : float
+            Dimensionless taper length β/lₓ ∈ (0, 1].  Default 1.0 (full taper).
 
         Returns
         -------
         BearingResult
         """
-        H = self._film(H0)
+        H = self._film(H0, B)
         P, converged = self._solve_pressure(H, Lambda, 12.0 * V)
         Wz = self._integrate(P)
-        K = self._stiffness(H0, Lambda)
+        K = self._stiffness(H0, Lambda, B)
         C = self._damping(H, Lambda, V)
         return BearingResult(
-            H0=H0, V=V, Lambda=Lambda,
+            H0=H0, V=V, Lambda=Lambda, B=B,
             P=P, Wz=Wz, K=K, C=C,
             omega=self.omega, converged=converged,
         )
@@ -180,9 +186,18 @@ class ThrustBearingSolver:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _film(self, H0: float) -> np.ndarray:
-        """Film-thickness matrix  H(X) = H₀ + (1 − X)."""
-        return H0 + 1.0 - self.X_grid
+    def _film(self, H0: float, B: float = 1.0) -> np.ndarray:
+        """Film-thickness matrix for a partial-taper pad.
+
+        B=1 (full taper):  H(X) = H₀ + (1 − X)
+        B<1 (partial):     H(X) = H₀ + (1 − X/B)  for X ≤ B
+                                  H₀                for B < X ≤ 1
+        """
+        return np.where(
+            self.X_grid <= B,
+            H0 + 1.0 - self.X_grid / B,
+            H0,
+        )
 
     def _solve_pressure(
         self, H: np.ndarray, Lambda: float, dHdt: float
@@ -249,11 +264,11 @@ class ThrustBearingSolver:
         """Dimensionless load capacity via Riemann sum  Wz ≈ Σ P ΔX ΔY."""
         return float(np.sum(P) * self.dx * self.dy)
 
-    def _stiffness(self, H0: float, Lambda: float) -> float:
+    def _stiffness(self, H0: float, Lambda: float, B: float = 1.0) -> float:
         """K = −∂Wz/∂H₀  (central FD, V = 0)."""
         eps = self.epsilon_fd
-        Hp, _ = self._solve_pressure(self._film(H0 + eps), Lambda, 0.0)
-        Hm, _ = self._solve_pressure(self._film(H0 - eps), Lambda, 0.0)
+        Hp, _ = self._solve_pressure(self._film(H0 + eps, B), Lambda, 0.0)
+        Hm, _ = self._solve_pressure(self._film(H0 - eps, B), Lambda, 0.0)
         return -(self._integrate(Hp) - self._integrate(Hm)) / (2.0 * eps)
 
     def _damping(self, H: np.ndarray, Lambda: float, V: float) -> float:

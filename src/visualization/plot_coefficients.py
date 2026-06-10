@@ -45,6 +45,9 @@ def _closest_lambda(unique_lambdas: np.ndarray, target: float) -> float:
 def make_figure(target: str, y_label: str, ref_fn, outdir: Path) -> None:
     """Create and save one coefficient figure."""
     df = pd.read_csv(DATA_CSV)
+    # Keep only full-taper rows (B=1) for the Lambda-effect figures
+    if "B" in df.columns:
+        df = df[np.isclose(df["B"], 1.0, atol=1e-3)]
     v_vals = df["V"].unique()
     v0 = v_vals[np.argmin(np.abs(v_vals))]
     df_v0 = df[df["V"] == v0].copy()
